@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace CircularBuffer
 {
@@ -16,7 +17,9 @@ namespace CircularBuffer
     /// http://www.boost.org/doc/libs/1_53_0/libs/circular_buffer/doc/circular_buffer.html
     /// because I liked their interface.
     /// </summary>
-    public class CircularBuffer<T> : IEnumerable<T>
+    [DebuggerDisplay("Count = {Count}")]
+    [DebuggerTypeProxy(typeof(IReadOnlyList<>))]
+    public class CircularBuffer<T> : IReadOnlyList<T>
     {
         private readonly T[] _buffer;
 
@@ -101,7 +104,7 @@ namespace CircularBuffer
         {
             get
             {
-                return Size == Capacity;
+                return Count == Capacity;
             }
         }
 
@@ -112,14 +115,14 @@ namespace CircularBuffer
         {
             get
             {
-                return Size == 0;
+                return Count == 0;
             }
         }
 
         /// <summary>
         /// Current buffer size (the number of elements that the buffer has).
         /// </summary>
-        public int Size { get { return _size; } }
+        public int Count => _size;
 
         /// <summary>
         /// Element at the front of the buffer - this[0].
@@ -271,14 +274,13 @@ namespace CircularBuffer
         /// <returns>A new array with a copy of the buffer contents.</returns>
         public T[] ToArray()
         {
-            T[] newArray = new T[Size];
+            T[] newArray = new T[Count];
             int newArrayOffset = 0;
-            var segments = ToArraySegments();
-            foreach (ArraySegment<T> segment in segments)
-            {
-                Array.Copy(segment.Array, segment.Offset, newArray, newArrayOffset, segment.Count);
-                newArrayOffset += segment.Count;
-            }
+            var (arraySegmentOne, arraySegmentTwo) = ToArraySegments();
+            Array.Copy(arraySegmentOne.Array, arraySegmentOne.Offset, newArray, newArrayOffset, arraySegmentOne.Count);
+            newArrayOffset += arraySegmentOne.Count;
+            Array.Copy(arraySegmentTwo.Array, arraySegmentTwo.Offset, newArray, newArrayOffset, arraySegmentTwo.Count);
+
             return newArray;
         }
 
@@ -289,38 +291,40 @@ namespace CircularBuffer
         /// according to insertion.
         ///
         /// Fast: does not copy the array elements.
-        /// Useful for methods like <c>Send(IList&lt;ArraySegment&lt;Byte&gt;&gt;)</c>.
         /// 
         /// <remarks>Segments may be empty.</remarks>
         /// </summary>
-        /// <returns>An IList with 2 segments corresponding to the buffer content.</returns>
-        public IList<ArraySegment<T>> ToArraySegments()
+        /// <returns> 2 segments corresponding to the buffer content.</returns>
+        public (ArraySegment<T>, ArraySegment<T>) ToArraySegments()
         {
-            return new [] { ArrayOne(), ArrayTwo() };
+            return (ArrayOne(), ArrayTwo());
         }
 
         #region IEnumerable<T> implementation
+
         /// <summary>
         /// Returns an enumerator that iterates through this buffer.
         /// </summary>
         /// <returns>An enumerator that can be used to iterate this collection.</returns>
         public IEnumerator<T> GetEnumerator()
         {
-            var segments = ToArraySegments();
-            foreach (ArraySegment<T> segment in segments)
+            var (arraySegmentOne, arraySegmentTwo) = ToArraySegments();
+            foreach (var item in arraySegmentOne)
             {
-                for (int i = 0; i < segment.Count; i++)
-                {
-                    yield return segment.Array[segment.Offset + i];
-                }
+                yield return item;
+            }
+            foreach (var item in arraySegmentTwo)
+            {
+                yield return item;
             }
         }
+
         #endregion
+
         #region IEnumerable implementation
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return (IEnumerator)GetEnumerator();
-        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
         #endregion
 
         private void ThrowIfEmpty(string message = "Cannot access an empty buffer.")
